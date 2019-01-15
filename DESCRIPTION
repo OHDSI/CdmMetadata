@@ -1,0 +1,38 @@
+Package: CdmMetadata
+Type: Package
+Title: Prototypes CDM Metadata and Annotations tables within a CDM database
+Version: 0.0.1
+Date: 2019-01-14
+Authors@R: c(
+    person("Ajit", "Londhe", email = "alondhe2@its.jnj.com", role = c("aut", "cre"))
+  )
+Maintainer: Ajit Londhe <alondhe2@its.jnj.com>
+LazyData: true
+Description: Creates metadata and annotation tables to a CDM database and provides Shiny app for metadata management and consumption.
+Depends:
+    SqlRender,
+    DatabaseConnector (>= 2.0.0)
+Imports:
+    dplyr,
+    shinyjs,
+    ParallelLogger,
+    plotly,
+    R.utils,
+    shiny (>= 1.2.0),
+    tidyr,
+    httr,
+    DT,
+    shinydashboard,
+    shinyWidgets,
+    magrittr,
+    shinycssloaders,
+    rjson,
+    jsonlite,
+    lubridate
+VignetteBuilder: knitr
+Remotes:
+    OHDSI/OhdsiRTools
+License: Apache License
+Roxygen: list(wrap = FALSE)
+RoxygenNote: 6.1.1
+Encoding: UTF-8

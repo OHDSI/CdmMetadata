@@ -1,0 +1,23 @@
+.main-header .logo {
+  font-family: 'Source Sans Pro',sans-serif;
+  font-weight: bold;
+  font-size: 16px;
+  letter-spacing: 5px;
+
+}
+
+.skin-blue .main-header .navbar {
+  background-color: #003142;
+  border-bottom: solid 1px #CCC;
+  border-left: solid 1px #CCC;
+}
+
+.skin-blue .main-header .logo {
+  background-color: #003142;
+  border-bottom: solid 1px #CCC;
+}
+
+.skin-blue .left-side, .skin-blue .main-sidebar, .skin-blue .wrapper {
+  background-color: #003142;
+}
+

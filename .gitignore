@@ -34,3 +34,12 @@ vignettes/*.pdf
 
 # Shiny token, see https://shiny.rstudio.com/articles/shinyapps.html
 rsconnect/
+.Rproj.user
+
+errorReport.txt
+output/
+
+*.log
+
+extras/sources.json
+inst/shinyApps/data

@@ -1,0 +1,29 @@
+INSERT INTO @resultsDatabaseSchema.meta_entity_activity
+(
+  meta_entity_activity_id,
+  meta_agent_id,
+  activity_concept_id,
+  activity_type_concept_id,
+  activity_as_string,
+  entity_concept_id,
+  entity_as_string,
+  entity_identifier,
+  activity_start_datetime,
+  activity_end_datetime,
+  security_concept_id
+)
+VALUES
+(
+  @meta_entity_activity_id,
+  @meta_agent_id,
+  @activity_concept_id,
+  @activity_type_concept_id,
+  @activity_as_string,
+  @entity_concept_id,
+  @entity_as_string,
+  @entity_identifier,
+  @activity_start_datetime,
+  @activity_end_datetime,
+  @security_concept_id
+);
+
