@@ -23,9 +23,8 @@ shinyServer(function(input, output, session) {
     shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=overview]")
     shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=provenance]")
     shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=heelResults]")
-    shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=conceptKb]")
-    shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=conceptSetKb]")
-    shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=cohortDefKb]")
+    shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=knowledgeBase]")
+    shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=design]")
     shinyjs::hide(id = "sidebarSelects")  
   }
   
@@ -70,7 +69,26 @@ shinyServer(function(input, output, session) {
     for (cdmSource in cdmSources) {
       connectionDetails <- .getConnectionDetails(cdmSource)
       
-      ffDir <- file.path(dataPath, "achillesConcepts", cdmSource$name)
+      ffDir <- file.path(dataPath, "persons", cdmSource$name, cdmSource$loadId)
+      if (!dir.exists(file.path(dataPath, "persons"))) {
+        dir.create(file.path(dataPath, "persons"), recursive = TRUE)
+      }
+      
+      if (!dir.exists(ffDir)) {
+        connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+        
+        sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "person/getPersons.sql"))
+        sql <- SqlRender::renderSql(sql = sql, 
+                                    cdmDatabaseSchema = cdmSource$cdmDatabaseSchema)$sql
+        sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails$dbms)$sql
+        
+        persons <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
+        
+        ffbase::save.ffdf(persons, dir = ffDir)
+        DatabaseConnector::disconnect(connection = connection)
+      }
+      
+      ffDir <- file.path(dataPath, "achillesConcepts", cdmSource$name, cdmSource$loadId)
       if (!dir.exists(file.path(dataPath, "achillesConcepts"))) {
         dir.create(file.path(dataPath, "achillesConcepts"), recursive = TRUE)
       }
@@ -90,7 +108,7 @@ shinyServer(function(input, output, session) {
         DatabaseConnector::disconnect(connection = connection)
       }
       
-      ffDir <- file.path(dataPath, "achillesResults", cdmSource$name)
+      ffDir <- file.path(dataPath, "achillesResults", cdmSource$name, cdmSource$loadId)
       if (!dir.exists(file.path(dataPath, "achillesResults"))) {
         dir.create(file.path(dataPath, "achillesResults"), recursive = TRUE)
       }
@@ -110,7 +128,7 @@ shinyServer(function(input, output, session) {
         DatabaseConnector::disconnect(connection = connection)
       }
       
-      ffDir <- file.path(dataPath, "observationPeriods", cdmSource$name)
+      ffDir <- file.path(dataPath, "observationPeriods", cdmSource$name, cdmSource$loadId)
       if (!dir.exists(file.path(dataPath, "observationPeriods"))) {
         dir.create(file.path(dataPath, "observationPeriods"), recursive = TRUE)
       }
@@ -130,7 +148,7 @@ shinyServer(function(input, output, session) {
         DatabaseConnector::disconnect(connection = connection)
       }
       
-      ffDir <- file.path(dataPath, "oneDayObs", cdmSource$name)
+      ffDir <- file.path(dataPath, "oneDayObs", cdmSource$name, cdmSource$loadId)
       if (!dir.exists(file.path(dataPath, "oneDayObs"))) {
         dir.create(file.path(dataPath, "oneDayObs"), recursive = TRUE)
       }
@@ -151,54 +169,150 @@ shinyServer(function(input, output, session) {
       }
     }
     
-    popRds <- file.path(dataPath, "totalPop.rds")
-    if (!file.exists(popRds)) {
-      results <- lapply(cdmSources, function(cdmSources) {
-        connectionDetails <- .getConnectionDetails(cdmSource)
-        connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
-        sql <- SqlRender::renderSql(sql = "select '@cdmSource' as cdm_source, count_value 
+    releases <- (readRDS(jsonPath))$releases
+    for (release in releases) {
+      theseSources <- cdmSources[sapply(cdmSources, function(c) c$release == release)]
+      popRds <- file.path(dataPath, release, "totalPop.rds")
+      if (!dir.exists(dirname(popRds))) { dir.create(path = dirname(popRds), recursive = TRUE)}
+      if (!file.exists(popRds)) {
+        results <- lapply(theseSources, function(cdmSource) {
+          connectionDetails <- .getConnectionDetails(cdmSource)
+          connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+          sql <- SqlRender::renderSql(sql = "select '@cdmSource' as cdm_source, count_value 
                                   from @resultsDatabaseSchema.achilles_results where analysis_id = 1;",
-                                    cdmSource = cdmSource$name,
-                                    resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)$sql
-        sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails$dbms)$sql
-        pop <- DatabaseConnector::querySql(connection = connection, sql = sql)
-        DatabaseConnector::disconnect(connection = connection)
-        pop
-      })
-      
-      totalPop <- do.call("rbind", results)
-      saveRDS(object = totalPop, file = popRds)
+                                      cdmSource = cdmSource$name,
+                                      resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)$sql
+          sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails$dbms)$sql
+          pop <- DatabaseConnector::querySql(connection = connection, sql = sql)
+          DatabaseConnector::disconnect(connection = connection)
+          pop
+        })
+        
+        totalPop <- do.call("rbind", results)
+        saveRDS(object = totalPop, file = popRds)
+      }
     }
     
     removeModal(session = session)
     #sql <- SqlRender::renderSql("select distinct vocabulary_version from @cdmDatabaseSchema.vocabulary where vocabulary_id = 'None'")$sql
     
   }
+  
+  .createAtlasLink <- function() {
+    atlasUrl <- (readRDS(jsonPath))$atlasUrl
+    output$atlasLink <- renderUI({
+      actionButton(inputId = "btnAtlas", label = "Open Atlas", 
+                   onclick = sprintf("window.open('%s', '_blank')", atlasUrl))  
+    })
+  }
+  
+  .getAllLoads <- function() {
+    cdmSources <- (readRDS(jsonPath))$sources
+    choices <- c()
+    for (release in (readRDS(jsonPath))$releases) {
+      theseSources <- cdmSources[sapply(cdmSources, function(c) c$release == release)]
+      theseSources <- lapply(theseSources, function(s) { list(name = s$name, loadId = s$loadId) })
+      
+      items <- lapply(theseSources, function(s) {
+        item <- list(s$loadId)
+        names(item) <- sprintf("%s (v%d)", s$name, s$loadId)
+        item
+      })
+      
+      names(items) <- c(release)
+      choices <- c(choices, items)
+    }
+    
+    choices
+  }
 
   .initSources <- function() {
     
-    cdmSources <- (readRDS(jsonPath))$sources
     siteSource <- list(
-      list(name = "All Instances")
+      "All Instances" = -999
     )
     
-    cdmSources <- c(siteSource, cdmSources)
-    shinyjs::show(selector = "#sidebarCollapsed li a[data-value=overview]")
-    shinyjs::show(id = "sidebarSelects")
-    updateSelectInput(session = session, inputId = "cdmSource", choices = lapply(cdmSources, function(c) c$name))
+    choices <- .getAllLoads()
+      
+    updateSelectInput(session = session, inputId = "cdmSource", choices = c(siteSource, choices))
   }
   
   if (!file.exists(jsonPath)) {
     updateTabItems(session = session, inputId = "tabs", selected = "config")
   } else {
     .warmCaches()
-    cdmSources <- (readRDS(jsonPath))$sources
-    siteSource <- list(
-      list(name = "All Instances")
-    )
-    cdmSources <- c(siteSource, cdmSources)
-    updateSelectInput(session = session, inputId = "cdmSource", choices = lapply(cdmSources, function(c) c$name))
+    .createAtlasLink()
+    .initSources()
     updateTabItems(session = session, inputId = "tabs", selected = "overview")
+  }
+  
+  # knowledge base --------------------------------------------------------
+  
+  .getPersonKb <- function() {
+    
+    #removeUI(selector = sprintf("#%s div:has(> .box)", parentDiv), session = session)
+    
+    newTabs <- list(
+      tabPanel(title = "Data Quality",
+               br()),
+      tabPanel(title = "Chart Review",
+               br())
+    )
+
+    output$kbContent <- renderUI({
+      do.call(tabsetPanel, newTabs)
+    })
+
+  }
+  
+  .getConceptKb <- function() {
+    newTabs <- list(
+      tabPanel(title = "Data Quality",
+               DT::dataTableOutput(outputId = "dtConceptHeels") %>% withSpinner(color = spinnerColor)),
+      tabPanel(title = "Time Series",
+               helpText("Time-based metadata about the selected concept"),
+               h4("Click on a point on the plot to add a temporal event. Or, click on an existing temporal event in the table below in order to edit or delete it."),
+               box(width = 8,
+                  plotlyOutput(outputId = "metaTimePlot")  %>% withSpinner(color = spinnerColor)
+               ),
+               box(width = 4,
+                  selectInput(inputId = "temporalStartDate", label = "Select Date", choices = c()),
+                  textAreaInput(inputId = "temporalEventValue", label = "Temporal Event Description",
+                                placeholder = "Enter a description of the temporal event connected to this concept at the above date"),
+                  actionButton(inputId = "btnAddTemporalEvent", label = "Add", icon = icon("check")),
+                  actionButton(inputId = "btnEditTemporalEvent", label = "Edit", icon = icon("edit")),
+                  actionButton(inputId = "btnDeleteTemporalEvent", label = "Delete", icon = icon("minus"))),
+               box(width = 12,
+                  DT::dataTableOutput(outputId = "dtTemporalEvent") %>% withSpinner(color="#0dc5c1"))
+               )
+      )
+    
+    output$kbContent <- renderUI({
+      do.call(tabsetPanel, newTabs)
+    })
+  }
+  
+  .getDomainKb <- function() {
+    newTabs <- list(
+      tabPanel(title = "Data Quality",
+               DT::dataTableOutput(outputId = "dtDomainHeels") %>% withSpinner(color = spinnerColor))
+    )
+  }
+  
+  .getConceptSetKb <- function() {
+    
+  }
+  
+  .getCohortDefKb <- function() {
+    
+  }
+  
+  .getPleKb <- function() {
+    
+  }
+  
+  .getPlpKb <- function() {
+    
   }
 
   # Heel Results download / upload --------------------------------------------
@@ -219,13 +333,14 @@ shinyServer(function(input, output, session) {
       
       json <- jsonlite::read_json(input$uploadSourcesJson$datapath)
       saveRDS(object = json, file = jsonPath)
+      shinyjs::show(selector = "#sidebarCollapsed li a[data-value=overview]")
+      shinyjs::show(id = "sidebarSelects")
       .initSources()
       reset(id = "uploadSourcesJson")
       sourcesFileInput$clear <- TRUE
       updateTabItems(session = session, inputId = "tabs", selected = "overview")
     }
   }, priority = 1000)
-  
   
   observeEvent(input$uploadHeelAnnotations, {
     heelFileInput$clear <- FALSE
@@ -244,19 +359,19 @@ shinyServer(function(input, output, session) {
         row <- df[i,]
         current <- .getHeelResults()[i,]
         
-        if (row$Heel.Status %in% heelIssueTypes &
-            !is.na(row$Heel.Annotation)) {
+        if (row$Issue.Status %in% heelIssueTypes &
+            !is.na(row$Issue.Annotation)) {
           if (current$ANNOTATION_AS_STRING != "Needs Review") {
-            if (row$Heel.Status != current$ANNOTATION_AS_STRING |
-                row$Heel.Annotation != current$VALUE_AS_STRING) {
+            if (row$Issue.Status != current$ANNOTATION_AS_STRING |
+                row$Issue.Annotation != current$VALUE_AS_STRING) {
               .updateHeelAnnotation(activityAsString = row$Message, 
-                                    annotationAsString = row$Heel.Status, 
-                                    valueAsString = row$Heel.Annotation)  
+                                    annotationAsString = row$Issue.Status, 
+                                    valueAsString = row$Issue.Annotation)  
             }
           } else {
             .addHeelAnnotation(activityAsString = row$Message, 
-                               annotationAsString = row$Heel.Status, 
-                               valueAsString = row$Heel.Annotation)
+                               annotationAsString = row$Issue.Status, 
+                               valueAsString = row$Issue.Annotation)
           }
         }
       }
@@ -314,7 +429,7 @@ shinyServer(function(input, output, session) {
     })
   }
   
-  output$conceptKbPlot <- renderPlotly({
+  output$metaTimePlot <- renderPlotly({
     req(input$conceptId)
     
     
@@ -325,7 +440,7 @@ shinyServer(function(input, output, session) {
         dplyr::distinct() %>%
         dplyr::arrange(DATE)
       
-      updateSelectInput(session = session, inputId = "conceptStartDate",
+      updateSelectInput(session = session, inputId = "temporalStartDate",
                         choices = dates)
     }
     
@@ -356,67 +471,6 @@ shinyServer(function(input, output, session) {
 
     table
   })
-  
-  
-  
-  
-  
-  
-  # .refreshPlotAndTable <- function() {
-  #   showModal(
-  #     modalDialog(title = "Loading Temporal Event Metadata", size = "m", 
-  #                 "Loading Temporal Event Metadata...")
-  #   )
-  #   
-  #   conceptsMeta <- conceptsMeta()
-  #   meta <- associatedTempEvents()
-  #   
-  #   output$conceptKbPlot <- renderPlotly({
-  #     .refreshConceptPlot(conceptsMeta, meta)
-  #   }) 
-  #   
-  #   output$dtTemporalEvent <- renderDataTable(expr = {
-  #     
-  #     metaDataTable <- dplyr::select(meta,
-  #                                    `Date` = DATE,
-  #                                    `Temporal Event` = VALUE_AS_STRING)
-  #     
-  #     options <- list(pageLength = 10,
-  #                     searching = TRUE,
-  #                     lengthChange = FALSE,
-  #                     ordering = TRUE,
-  #                     paging = TRUE,
-  #                     scrollY = '15vh')
-  #     selection <- list(mode = "single", target = "row")
-  #     
-  #     table <- datatable(metaDataTable,
-  #                        options = options,
-  #                        selection = "single",
-  #                        rownames = FALSE,
-  #                        class = "stripe nowrap compact", extensions = c("Responsive"))
-  #     
-  #     table
-  #   })
-  #   
-  #   if (nrow(conceptsMeta) > 0) {
-  #     
-  #     dates <- dplyr::select(conceptsMeta,
-  #                            DATE) %>% 
-  #       dplyr::distinct() %>%
-  #       dplyr::arrange(DATE)
-  #       
-  #     updateSelectInput(session = session, inputId = "conceptStartDate",
-  #                       choices = dates)
-  #   }
-  #   
-  #   removeModal(session = session)
-  # }
-  
-  # observeEvent(eventExpr = input$conceptId, handlerExpr = {
-  #   req(input$conceptId)
-  #   .refreshPlotAndTable()
-  #   
-  # }, priority = 1000)
   
   # CRUD buttons -----------------------------------
   
@@ -449,6 +503,30 @@ shinyServer(function(input, output, session) {
   
   # Reactives ---------------------------------------------------------------------
   
+  persons <- reactive({
+    load.ffdf(file.path(dataPath, "persons", currentSource()$name, input$cdmSource))
+    df <- (as.data.frame(persons))
+    
+    sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "person", "getCountKnownPersonMeta.sql"))
+    sql <- SqlRender::renderSql(sql = sql, 
+                                resultsDatabaseSchema = resultsDatabaseSchema())$sql
+    sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails()$dbms)$sql
+    
+    connection <- DatabaseConnector::connect(connectionDetails = connectionDetails())
+    on.exit(DatabaseConnector::disconnect(connection = connection))
+    knownMeta <- DatabaseConnector::querySql(connection = connection, sql = sql)
+    df <- dplyr::left_join(x = df, y = knownMeta, by = "PERSON_ID")
+    df$NUM_ANNOTATIONS[is.na(df$NUM_ANNOTATIONS)] <- 0
+    df$GENDER_CONCEPT_ID[df$GENDER_CONCEPT_ID == 8532] <- "Female"
+    df$GENDER_CONCEPT_ID[df$GENDER_CONCEPT_ID == 8507] <- "Male"
+    
+    df <- dplyr::arrange(df, NUM_ANNOTATIONS) %>%
+      dplyr::select(`Person Id` = PERSON_ID,
+                    `Birth Year` = YEAR_OF_BIRTH,
+                    `Gender` = GENDER_CONCEPT_ID,
+                    `Number of Annotations` = NUM_ANNOTATIONS)
+  })
+  
   conceptsMeta <- reactive({
     
     refresh$conceptKb
@@ -458,8 +536,8 @@ shinyServer(function(input, output, session) {
     
     #req(input$domainId)
     
-    load.ffdf(file.path(dataPath, "achillesResults", currentSource()$name))
-    load.ffdf(file.path(dataPath, "oneDayObs", currentSource()$name))
+    load.ffdf(file.path(dataPath, "achillesResults", currentSource()$name, input$cdmSource))
+    load.ffdf(file.path(dataPath, "oneDayObs", currentSource()$name, input$cdmSource))
     
     denoms <- as.data.frame(oneDayObs, stringsAsFactors = FALSE)
     
@@ -534,16 +612,16 @@ shinyServer(function(input, output, session) {
     req(input$cdmSource)
     cdmSources <- (readRDS(jsonPath))$sources
     siteSource <- list(
-      list(name = "All Instances")
+      list(name = "All Instances",
+           loadId = -999)
     )
     cdmSources <- c(siteSource, cdmSources)
-    index <- which(sapply(cdmSources, function(c) c$name == input$cdmSource))
-    cdmSources[[index]]  
+    cdmSources[sapply(cdmSources, function(c) c$loadId == input$cdmSource)][[1]]
   })
   
   connectionDetails <- reactive({
     req(currentSource())
-    if (input$cdmSource != "All Instances") {
+    if (input$cdmSource != -999) {
       .getConnectionDetails(currentSource())
     } else {
       FALSE
@@ -552,7 +630,7 @@ shinyServer(function(input, output, session) {
   
   resultsDatabaseSchema <- reactive({
     if (file.exists(jsonPath)) {
-      if (input$cdmSource != "All Instances") {
+      if (input$cdmSource != -999) {
         currentSource()$resultsDatabaseSchema
       } else {
         FALSE
@@ -564,7 +642,7 @@ shinyServer(function(input, output, session) {
   
   cdmDatabaseSchema <- reactive({
     if (file.exists(jsonPath)) {
-      if (input$cdmSource != "All Instances") {
+      if (input$cdmSource != -999) {
         currentSource()$cdmDatabaseSchema
       } else {
         FALSE
@@ -576,7 +654,7 @@ shinyServer(function(input, output, session) {
   
   vocabDatabaseSchema <- reactive({
     if (file.exists(jsonPath)) {
-      if (input$cdmSource != "All Instances") {
+      if (input$cdmSource != -999) {
         currentSource()$vocabDatabaseSchema
       } else {
         FALSE
@@ -587,7 +665,7 @@ shinyServer(function(input, output, session) {
   })
   
   cohortDefinitions <- reactive({
-    if (input$cdmSource != "All Instances") {
+    if (input$cdmSource != -999) {
       url <- sprintf("%1s/cohortdefinition", baseUrl())
       cohorts <- httr::content(httr::GET(url))
       cohorts <- lapply(cohorts, function(c) {
@@ -600,7 +678,7 @@ shinyServer(function(input, output, session) {
   })
 
   conceptSets <- reactive({
-    if (input$cdmSource != "All Instances") {
+    if (input$cdmSource != -999) {
       url <- sprintf("%1s/conceptset", baseUrl())
       sets <- httr::content(httr::GET(url))
       sets <- lapply(sets, function(c) {
@@ -655,7 +733,7 @@ shinyServer(function(input, output, session) {
                                       and B.value_as_string = '@valueAsString';",
                                 resultsDatabaseSchema = resultsDatabaseSchema(),
                                 entityConceptId = input$conceptId,
-                                activityStartDate = input$conceptStartDate,
+                                activityStartDate = input$temporalStartDate,
                                 valueAsString = input$temporalEventValue)$sql
     
     sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails()$dbms)$sql
@@ -690,8 +768,8 @@ shinyServer(function(input, output, session) {
       activity_concept_id = 0,
       activity_type_concept_id = 0,
       activity_as_string = "Temporal Event",
-      activity_start_date = ymd(format(as.Date(input$conceptStartDate), "%Y-%m-01")),
-      activity_end_date = ymd(format(as.Date(input$conceptStartDate), "%Y-%m-01")),
+      activity_start_date = ymd(format(as.Date(input$temporalStartDate), "%Y-%m-01")),
+      activity_end_date = ymd(format(as.Date(input$temporalStartDate), "%Y-%m-01")),
       security_concept_id = 0, stringsAsFactors = FALSE
     )
     
@@ -738,7 +816,7 @@ shinyServer(function(input, output, session) {
                                       and B.value_as_string = '@valueAsString';",
                                 resultsDatabaseSchema = resultsDatabaseSchema(),
                                 entityConceptId = input$conceptId,
-                                activityStartDate = input$conceptStartDate,
+                                activityStartDate = input$temporalStartDate,
                                 valueAsString = df[row_count,]$VALUE_AS_STRING)$sql
     
     sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails()$dbms)$sql
@@ -842,7 +920,7 @@ shinyServer(function(input, output, session) {
     connectionDetails <- .getConnectionDetails(cdmSource)
     
     #df <- readRDS(file.path(dataPath, "observationPeriods", sprintf("%s.rds", cdmSource$name)))
-    load.ffdf(file.path(dataPath, "observationPeriods", input$cdmSource))
+    load.ffdf(file.path(dataPath, "observationPeriods", currentSource()$name, input$cdmSource))
     
     df <- as.data.frame(observationPeriods, stringsAsFactors = FALSE)
     
@@ -859,14 +937,25 @@ shinyServer(function(input, output, session) {
                shinydashboard::box(title = cdmSource$name, collapsible = TRUE, width = width,
                                    div(.getSourceDescription(connectionDetails,
                                                              cdmSource$resultsDatabaseSchema)),
-                                   div(h4("Start Date"), min(df$DATE)),
-                                   div(h4("End Date"), max(df$DATE)),
-                                   # div(h4("CDM Version", cdmVersion)),
-                                   # div(h4("Vocab Version", vocabVersion)),
-                                   div(h4("Population Count", .getSourcePopulation())),
                                    plot
                )
              }, session = session)
+    
+    output$provStartDate <- renderInfoBox({
+      infoBox("Start Date", 
+              min(df$DATE), color = "green",
+              icon = icon("hourglass-start"), fill = TRUE)  
+    })
+    output$provEndDate <- renderInfoBox({
+      infoBox("End Date", 
+              max(df$DATE), color = "red",
+              icon = icon("hourglass-end"), fill = TRUE)  
+    })
+    output$provNumPersons <- renderInfoBox({
+      infoBox("Total Persons", 
+              .getSourcePopulation(), color = "purple",
+              icon = icon("users"), fill = TRUE)  
+    })
   }
   
   .refreshAgents <- function() {
@@ -883,34 +972,155 @@ shinyServer(function(input, output, session) {
   # Observes ----------------------------------------------------------
   
   observe({
+    if (input$tabs == "overview") {
+      
+      releases <- (readRDS(jsonPath))$releases
+      
+      tabs <- lapply(releases, function(release) {
+        cdmSources <- (readRDS(jsonPath))$sources
+        cdmSources <- cdmSources[sapply(cdmSources, function(c) c$release == release)]
+        
+        df <- readRDS(file.path(dataPath, release, "totalPop.rds"))
+        totalPop <- sum(df$COUNT_VALUE)
+        
+        humanAgents <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
+          connectionDetails <- .getConnectionDetails(cdmSource)
+          connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+          sql <- SqlRender::renderSql(sql = "select agent_first_name, agent_last_name 
+                                      from @resultsDatabaseSchema.meta_agent where meta_agent_concept_id = 1000;",
+                                      resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)$sql
+          sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails$dbms)$sql
+          agents <- DatabaseConnector::querySql(connection = connection, sql = sql)
+          DatabaseConnector::disconnect(connection = connection)
+          agents
+        })
+        
+        algorithmAgents <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
+          connectionDetails <- .getConnectionDetails(cdmSource)
+          connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+          sql <- SqlRender::renderSql(sql = "select agent_algorithm 
+                                      from @resultsDatabaseSchema.meta_agent where meta_agent_concept_id = 2000;",
+                                      resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)$sql
+          sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails$dbms)$sql
+          agents <- DatabaseConnector::querySql(connection = connection, sql = sql)
+          DatabaseConnector::disconnect(connection = connection)
+          agents
+        })
+        
+        uniqueHumans <- dplyr::distinct(do.call("rbind", humanAgents))
+        uniqueAlgorithms <- dplyr::distinct(do.call("rbind", algorithmAgents))
+        
+        counts <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
+          connectionDetails <- .getConnectionDetails(cdmSource)
+          connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+          sql <- SqlRender::renderSql(sql = "select count(*) from @resultsDatabaseSchema.meta_entity_activity;",
+                                      resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)$sql
+          sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails$dbms)$sql
+          count <- DatabaseConnector::querySql(connection = connection, sql = sql)
+          DatabaseConnector::disconnect(connection = connection)
+          as.integer(count > 0)
+        })
+        
+        prop <- sum(unlist(counts)) / length(cdmSources)
+        
+        
+        tabPanel(title = sprintf("Release %s", release),
+                 
+          infoBox("Number of CDM Instances", 
+                  length(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)]), 
+                  icon = icon("sitemap"), fill = TRUE),
+          infoBox(
+            "Total Persons", prettyNum(totalPop, big.mark = ","), icon = icon("users"),
+            color = "purple", fill = TRUE
+          ),
+          infoBox(
+            "Number of Distinct Human Agents", nrow(uniqueHumans), icon = icon("user-tag"),
+            color = "red", fill = TRUE
+          ),
+          infoBox(
+            "Number of Distinct Algorithm Agents", nrow(uniqueAlgorithms), icon = icon("code"),
+            color = "yellow", fill = TRUE
+          ),
+          infoBox(
+            "Proportion of Sources with Metadata", prop * 100.00, icon = icon("percent"),
+            color = "green", fill = TRUE
+          )
+        )
+      })
+      
+      output$overviewBoxes <- renderUI({
+        do.call(tabsetPanel, tabs)
+      })
+    }
+    
+  })
+  
+  
+  observe({
     req(input$cdmSource)
-    if (input$cdmSource != "All Instances") {
+    if (input$cdmSource != -999) {
       .refreshAgents()
+      
+      choices <- .getAllLoads()
+      choices <- choices[sapply(choices, function(c) { c != input$cdmSource})]
+      updateSelectInput(session = session, inputId = "comparatorSource", choices = choices)
     }  
   })
   
   observe({
     req(currentSource())
-    if (input$tabs == "conceptKb" & currentSource()$name != "All Instances") {
+    
+    if (input$tabs == "knowledgeBase" & currentSource()$loadId != -999
+        & input$kbTabs == "Person") {
       
-      if (input$domainId == "") {
-        updateSelectInput(session = session, inputId = "domainId", choices = domainConceptIds)  
-        .refreshConceptId(domainConceptIds[[1]])
-      }
+      df <- persons()
       
-      # nothing in the textbox, so can't do anything
-      if (input$temporalEventValue == "" | input$conceptStartDate == "") {
-        shinyjs::disable(id = "btnAddTemporalEvent")
-        shinyjs::disable(id = "btnEditTemporalEvent")
-        shinyjs::disable(id = "btnDeleteTemporalEvent")
-      } else if (length(input$dtTemporalEvent_rows_selected) == 0) {
-        shinyjs::enable(id = "btnAddTemporalEvent")
-        shinyjs::disable(id = "btnEditTemporalEvent")
-        shinyjs::disable(id = "btnDeleteTemporalEvent")
-        #updateTextInput(session = session, inputId = "temporalEventValue", value = "")
-      } else {
-        shinyjs::enable(id = "btnEditTemporalEvent")
-        shinyjs::enable(id = "btnDeleteTemporalEvent")
+      output$dtPersonPicker <- renderDataTable({
+        options <- list(pageLength = 50,
+                        searching = TRUE,
+                        lengthChange = FALSE,
+                        ordering = TRUE,
+                        paging = TRUE,
+                        scrollY = '35vh')
+        selection <- list(mode = "single", target = "row")
+        
+        table <- datatable(df,
+                           options = options,
+                           selection = "single",
+                           rownames = FALSE, 
+                           class = "stripe wrap compact", extensions = c("Responsive"))
+        
+        table
+      })
+    }
+    
+    
+    if (input$tabs == "knowledgeBase" & currentSource()$loadId != -999) {
+      if (input$kbTabs == "Domain") {
+        updateSelectInput(session = session, inputId = "domainIdKb", choices = domainConceptIds)  
+      }  
+    
+      if (input$kbTabs == "Concept" & input$kbConcept == "Time Series") {
+        
+        if (input$domainId == "") {
+          updateSelectInput(session = session, inputId = "domainId", choices = domainConceptIds)  
+          .refreshConceptId(domainConceptIds[[1]])
+        }
+        
+        #nothing in the textbox, so can't do anything
+        # if (input$temporalEventValue == "" | input$temporalStartDate == "") {
+        #   shinyjs::disable(id = "btnAddTemporalEvent")
+        #   shinyjs::disable(id = "btnEditTemporalEvent")
+        #   shinyjs::disable(id = "btnDeleteTemporalEvent")
+        # } else if (length(input$dtTemporalEvent_rows_selected) == 0) {
+        #   shinyjs::enable(id = "btnAddTemporalEvent")
+        #   shinyjs::disable(id = "btnEditTemporalEvent")
+        #   shinyjs::disable(id = "btnDeleteTemporalEvent")
+        #   #updateTextInput(session = session, inputId = "temporalEventValue", value = "")
+        # } else {
+        #   shinyjs::enable(id = "btnEditTemporalEvent")
+        #   shinyjs::enable(id = "btnDeleteTemporalEvent")
+        # }
       }
     }
   })
@@ -919,7 +1129,7 @@ shinyServer(function(input, output, session) {
     req(currentSource())
     input$btnSubmitHeel
     input$btnDeleteHeel
-    if (currentSource()$name != "All Instances") {
+    if (currentSource()$loadId != -999) {
       shinyjs::show(id = "tasksDropdown")
       
       sourceDesc <- .getSourceDescription(connectionDetails = connectionDetails(), 
@@ -958,7 +1168,7 @@ shinyServer(function(input, output, session) {
   observe({
     clicked <- event_data(event = "plotly_click", source = "C", session = session)
     if (!is.null(clicked)) {
-      updateSelectInput(session = session, inputId = "conceptStartDate", selected = clicked$x)
+      updateSelectInput(session = session, inputId = "temporalStartDate", selected = clicked$x)
     }
     
   })
@@ -966,29 +1176,29 @@ shinyServer(function(input, output, session) {
   
   observe({
     req(input$cdmSource)
-    if (input$cdmSource == "All Instances") {
+    if (input$cdmSource == -999) {
       shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=provenance]")
       shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=heelResults]")  
-      shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=conceptKb]")  
-      shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=conceptSetKb]")  
-      shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=cohortDefKb]")  
+      shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=knowledgeBase]")  
+      shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=design]") 
       
       updateTabItems(session = session, inputId = "tabs", selected = "overview")
       
     } else {
       shinyjs::show(selector = "#sidebarCollapsed li a[data-value=provenance]")
       shinyjs::show(selector = "#sidebarCollapsed li a[data-value=heelResults]")  
-      shinyjs::show(selector = "#sidebarCollapsed li a[data-value=conceptKb]")  
-      shinyjs::show(selector = "#sidebarCollapsed li a[data-value=conceptSetKb]")  
-      shinyjs::show(selector = "#sidebarCollapsed li a[data-value=cohortDefKb]")  
+      shinyjs::show(selector = "#sidebarCollapsed li a[data-value=knowledgeBase]")  
+      shinyjs::show(selector = "#sidebarCollapsed li a[data-value=design]")    
       updateTabItems(session = session, inputId = "tabs", selected = "provenance")
     }  
+    
+    
   })
   
   observe({
     req(input$cdmSource)
 
-    if (input$tabs == "provenance" & input$cdmSource != "All Instances") {
+    if (input$tabs == "provenance" & input$cdmSource != -999) {
       .createSourceOverview(cdmSource = currentSource(), parentDiv = "overviewBox", width = 12)
     }
   }) 
@@ -996,8 +1206,32 @@ shinyServer(function(input, output, session) {
   
   # Output DataTable renders ------------------------------------------
   
+  output$dtSourcesOverview <- renderDataTable({
+    cdmSources <- (readRDS(jsonPath))$sources
+    
+    df <- as.data.frame(cdmSources)
+    df <- dplyr::select(df,
+                        `Instance Name` = name)
+    options <- list(pageLength = 10,
+                    searching = TRUE,
+                    lengthChange = FALSE,
+                    ordering = TRUE,
+                    paging = TRUE,
+                    scrollY = '15vh')
+    selection <- list(mode = "single", target = "row")
+    
+    table <- datatable(df,
+                       options = options,
+                       selection = "single",
+                       rownames = FALSE,
+                       class = "stripe nowrap compact", extensions = c("Responsive"))
+    
+    table
+  })
+  
   output$dtCohortPicker <- renderDataTable({
-    df <- cohortDefinitions()
+    df <- cohortDefinitions() %>%
+      dplyr::arrange(ID)
     
     options <- list(pageLength = 50,
                     searching = TRUE,
@@ -1017,7 +1251,8 @@ shinyServer(function(input, output, session) {
   })
   
   output$dtConceptSetPicker <- renderDataTable({
-    df <- conceptSets()
+    df <- conceptSets() %>%
+      dplyr::arrange(ID)
     
     options <- list(pageLength = 50,
                     searching = TRUE,
@@ -1420,8 +1655,8 @@ shinyServer(function(input, output, session) {
   
   output$numSources <- renderInfoBox({
     cdmSources <- (readRDS(jsonPath))$sources
-    infoBox("Number of CDM Sources", 
-            length(cdmSources[sapply(cdmSources, function(c) c$name != "All Instances")]), 
+    infoBox("Number of CDM Instances", 
+            length(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)]), 
             icon = icon("sitemap"), fill = TRUE)
   })
  
@@ -1436,7 +1671,7 @@ shinyServer(function(input, output, session) {
   
   output$numHumanAgents <- renderInfoBox({
     cdmSources <- (readRDS(jsonPath))$sources
-    agents <- lapply(cdmSources[sapply(cdmSources, function(c) c$name != "All Instances")], function(cdmSource) {
+    agents <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
       connectionDetails <- .getConnectionDetails(cdmSource)
       connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
       sql <- SqlRender::renderSql(sql = "select agent_first_name, agent_last_name 
@@ -1458,7 +1693,7 @@ shinyServer(function(input, output, session) {
   
   output$numAlgorithmAgents <- renderInfoBox({
     cdmSources <- (readRDS(jsonPath))$sources
-    agents <- lapply(cdmSources[sapply(cdmSources, function(c) c$name != "All Instances")], function(cdmSource) {
+    agents <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
       connectionDetails <- .getConnectionDetails(cdmSource)
       connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
       sql <- SqlRender::renderSql(sql = "select agent_algorithm 
@@ -1479,7 +1714,7 @@ shinyServer(function(input, output, session) {
   
   output$propTagged <- renderInfoBox({
     cdmSources <- (readRDS(jsonPath))$sources
-    counts <- lapply(cdmSources[sapply(cdmSources, function(c) c$name != "All Instances")], function(cdmSource) {
+    counts <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
       connectionDetails <- .getConnectionDetails(cdmSource)
       connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
       sql <- SqlRender::renderSql(sql = "select count(*) from @resultsDatabaseSchema.meta_entity_activity;",
@@ -1490,7 +1725,7 @@ shinyServer(function(input, output, session) {
       as.integer(count > 0)
     })
     
-    prop <- sum(unlist(counts)) / length(cdmSources[sapply(cdmSources, function(c) c$name != "All Instances")])
+    prop <- sum(unlist(counts)) / length(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)])
     
     infoBox(
       "Proportion of Sources with Metadata", prop * 100.00, icon = icon("percent"),
@@ -1507,7 +1742,7 @@ shinyServer(function(input, output, session) {
     shinyjs::disable(id = "conceptId")
     showModal(modalDialog(title = "Initializing", "Initializing"))
     
-    load.ffdf(file.path(dataPath, "achillesConcepts", input$cdmSource))
+    load.ffdf(file.path(dataPath, "achillesConcepts", currentSource()$name, input$cdmSource))
     
     selected <- subset.ffdf(achillesConcepts, subset = ANALYSIS_ID == domainId)
     selected <- as.data.frame(selected, stringsAsFactors = FALSE) %>%
@@ -1537,7 +1772,7 @@ shinyServer(function(input, output, session) {
   observeEvent(input$btnEditTemporalEvent, handlerExpr = {
     .editTemporalEvent()
     updateTextAreaInput(session = session, inputId = "temporalEventValue", value = "")
-    updateTextInput(session = session, inputId = "conceptStartDate", value = "")
+    updateTextInput(session = session, inputId = "temporalStartDate", value = "")
     
     refresh$conceptKb <- TRUE
   }, priority = 1000)
@@ -1551,7 +1786,7 @@ shinyServer(function(input, output, session) {
     if (input$confirmDeleteTempEvent) {
       .deleteTemporalEvent()
       updateTextAreaInput(session = session, inputId = "temporalEventValue", value = "")
-      updateTextInput(session = session, inputId = "conceptStartDate", value = "")  
+      updateTextInput(session = session, inputId = "temporalStartDate", value = "")  
       refresh$conceptKb <- TRUE
     }
   })
@@ -1559,10 +1794,36 @@ shinyServer(function(input, output, session) {
   
   observeEvent(input$btnAddTemporalEvent, handlerExpr = {
     .addTemporalEvent()
-    updateTextInput(session = session, inputId = "conceptStartDate", value = "")
+    updateTextInput(session = session, inputId = "temporalStartDate", value = "")
     updateTextAreaInput(session = session, inputId = "temporalEventValue", value = "")
     refresh$conceptKb <- TRUE
   }, priority = 1000)
+  
+  observeEvent(eventExpr = input$dtPersonPicker_rows_selected, handlerExpr = {
+    row_count <- input$dtPersonPicker_rows_selected
+    
+    df <- persons()
+    
+    sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "person", "getCohortsForPerson.sql"))
+    sql <- SqlRender::renderSql(sql = sql, resultsDatabaseSchema = resultsDatabaseSchema(),
+                                personId = df[row_count,]$`Person Id`)$sql
+    sql <- SqlRender::translateSql(sql = sql, targetDialect = connectionDetails()$dbms)$sql
+    
+    connection <- DatabaseConnector::connect(connectionDetails = connectionDetails())
+    on.exit(DatabaseConnector::disconnect(connection = connection))
+    
+    cohorts <- DatabaseConnector::querySql(connection = connection, sql = sql)
+    
+    if (length(cohorts) > 0) {
+      cohorts <- lapply(cohorts, function(c) {
+        setNames(c, sprintf("%d - %s", c, 
+                            OhdsiRTools::getCohortDefinitionName(baseUrl = baseUrl(), definitionId = c, formatName = FALSE)))
+      })
+      
+      updateSelectInput(session = session, inputId = "cohortsForPerson", choices = cohorts)
+    }
+    
+  })
   
   observeEvent(eventExpr = input$dtTemporalEvent_rows_selected, handlerExpr = {
     
@@ -1576,7 +1837,7 @@ shinyServer(function(input, output, session) {
     
     activityStartDate <- df[row_count,]$DATE
     valueAsString <- df[row_count,]$VALUE_AS_STRING
-    updateTextInput(session = session, inputId = "conceptStartDate", value = activityStartDate)
+    updateTextInput(session = session, inputId = "temporalStartDate", value = activityStartDate)
     updateTextAreaInput(session = session, inputId = "temporalEventValue", value = valueAsString)
     
   }, priority = 1000)
@@ -1783,7 +2044,7 @@ shinyServer(function(input, output, session) {
       activity_concept_id = 0,
       activity_type_concept_id = 0,
       activity_as_string = "Temporal Event",
-      activity_start_date = as.Date(input$conceptStartDate),
+      activity_start_date = as.Date(input$temporalStartDate),
       activity_end_date = NA,
       security_concept_id = 0, stringsAsFactors = FALSE
     )
@@ -2175,3 +2436,7 @@ shinyServer(function(input, output, session) {
 
 })
 
+
+
+
+# selectInput(inputId = "cohortsForPerson", multiple = FALSE, label = "Pick a Cohort", choices = c(), width = "400px"))

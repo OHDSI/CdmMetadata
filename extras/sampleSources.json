@@ -1,9 +1,15 @@
 {
   "baseUrl": "http://api.ohdsi.org:80/WebAPI",
-  "atlasUrl": "",
+  "atlasUrl": "http://www.ohdsi.org/web/atlas",
+  "releases": [
+    "201812",
+    "201901",
+    "201902"
+  ],
   "sources": [
     {
       "name": "SynPuf",
+      "release": "201902",
       "dbms": "postgresql",
       "user": "someUser",
       "password": "somePassword",
