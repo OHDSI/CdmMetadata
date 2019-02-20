@@ -49,10 +49,10 @@ createTables <- function(connectionDetails,
                                              resultsDatabaseSchema = resultsDatabaseSchema)
     connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
     exists <- tryCatch({
-      existsSql <- SqlRender::renderSql("select top 1 * from @resultsDatabaseSchema.@table;",
+      existsSql <- SqlRender::render("select top 1 * from @resultsDatabaseSchema.@table;",
                                         resultsDatabaseSchema = resultsDatabaseSchema,
-                                        table = tools::file_path_sans_ext(sqlFile))$sql
-      existsSql <- SqlRender::translateSql(sql = existsSql, targetDialect = connectionDetails$dbms)$sql
+                                        table = tools::file_path_sans_ext(sqlFile))
+      existsSql <- SqlRender::translate(sql = existsSql, targetDialect = connectionDetails$dbms)
       
       dummy <- DatabaseConnector::querySql(connection = connection, sql = existsSql)
       

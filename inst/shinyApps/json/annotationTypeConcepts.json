@@ -1,0 +1,16 @@
+{
+  "Suggestion" : [
+    "Workaround",
+    "Solution"
+  ],
+  "Warning" : [
+    "Workaround",
+    "Solution"
+  ],
+  "Adjudication" : [
+    "Assertion - Phenotype",
+    "Assertion - Patient"
+  ],
+  "Issue" : [],
+  "Non-Issue" :[]
+}

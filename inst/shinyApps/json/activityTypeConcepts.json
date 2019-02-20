@@ -1,0 +1,22 @@
+{
+  "Conformance - Validation" : [
+    "Value",
+    "Relational",
+    "Computational"
+  ],
+  "Plausibility - Validation" : [
+    "Uniqueness",
+    "Atemporal",
+    "Temporal"
+  ],
+  "Conformance - Verification" : [
+    "Value",
+    "Relational",
+    "Computational"
+  ],
+  "Plausibility - Verification" : [
+    "Uniqueness",
+    "Atemporal",
+    "Temporal"
+  ]
+}

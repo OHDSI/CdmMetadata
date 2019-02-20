@@ -59,13 +59,6 @@ ui <- dashboardPage(
       tabItem("overview",
               h3("Site Overview"),
               helpText("View aggregated metadata about all CDM instances in the site"),
-              # fluidRow(
-              #   infoBoxOutput(outputId = "numSources"),
-              #   infoBoxOutput(outputId = "numPersons"),
-              #   infoBoxOutput(outputId = "numHumanAgents"),
-              #   infoBoxOutput(outputId = "numAlgorithmAgents"),
-              #   infoBoxOutput(outputId = "propTagged")
-              # )
               uiOutput(outputId = "overviewBoxes")
               ),
       tabItem("provenance",
@@ -116,9 +109,19 @@ ui <- dashboardPage(
                 # Viewer Box
                 box(width = 12,
                     uiOutput(outputId = "selectedElement"),
+                    conditionalPanel(condition = "input.kbTabs == 'Person'",
+                                     tabsetPanel(type = "pills", id = "kbPerson",
+                                                 tabPanel("Data Quality",
+                                                          actionButton(inputId = "btnAddPersonDq", label = "Add Metadata"),
+                                                          actionButton(inputId = "btnEditPersonDq", label = "Edit Selected Metadata"),
+                                                          actionButton(inputId = "btnDeletePersonDq", label = "Delete Metadata")),
+                                                 tabPanel("Chart Review",
+                                                          "Under Construction"))),
                     conditionalPanel(condition = "input.kbTabs == 'Concept'",
                                      tabsetPanel(type = "pills", id = "kbConcept",
-                                                 tabPanel("Data Quality"),
+                                                 
+                                                 tabPanel("Data Quality",
+                                                          actionButton(inputId = "btnManageConceptDq", label = "Manage Concept-level DQ metadata")),
                                                  tabPanel("Time Series",
                                                           fluidRow(
                                                             box(width = 8, 
@@ -132,25 +135,7 @@ ui <- dashboardPage(
                     ),
                 # Editor Box
                 box(width = 12,
-                    
-                    conditionalPanel(condition = "input.kbTabs == 'Person'",
-                                     tabsetPanel(type = "pills", id = "kbPerson",
-                                                 tabPanel("Data Quality",
-                                                          selectInput(inputId = "dqActivityPerson", label = "Activity: What DQ phenomenon is happening to this person?", 
-                                                                      choices = c("Conformance: A value in the person's history does not adhere to an external or internal standard" = "conformance",
-                                                                                  "Completeness: A value in the person's history is not present" = "completeness",
-                                                                                  "Plausibility: A value in the person's history is not believable" = "plausibility"))),
-                                                          selectInput(inputId = "dqActivityTypePerson", label = "Activity Type: A more granular way to define the DQ phenomenon happening to this person", 
-                                                                      width = "250px", choices = c()),
-                                                          div(style = "display:inline-block;text-align: left; width: 250px;", 
-                                                            dateInput(inputId = "startDateDqPerson", label = "Activity Date: When did this phenomenon start to happen in the person's history?", width = "250px")),
-                                                          div(style = "display:inline-block;text-align: left; width: 250px;", 
-                                                            dateInput(inputId = "endDateDqPerson", label = "Activity Date: When did this phenomenon stop happening for this person?", width = "250px")),
-                                                          br(), br(),
-                                                          actionButton(inputId = "btnDqAddValues", label = "Add Values associated with the phenomenon (numbers, descriptions)", icon = icon("plus"))
-                                                 
-                                                 )
-                                     ),
+  
                     conditionalPanel(condition = "input.kbTabs == 'Concept'",
                                      tabsetPanel(type = "pills", id = "kbConcept",
                                                  tabPanel("Data Quality"),
