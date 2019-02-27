@@ -59,17 +59,33 @@ shinyServer(function(input, output, session) {
   
   .warmCaches <- function() {
     
-    showModal(
-      modalDialog(size = "m",
-                  title = "Warming Achilles caches",
-                  "Warming Achilles caches in order to serve up metadata faster"
-      )
-    )
-    
     cdmSources <- (readRDS(sourcesPath))$sources
     
     for (cdmSource in cdmSources) {
       connectionDetails <- .getConnectionDetails(cdmSource)
+      CdmMetadata::createTables(connectionDetails = connectionDetails, resultsDatabaseSchema = cdmSource$resultsDatabaseSchema, outputFolder = "output")
+      
+      showModal(
+        modalDialog(size = "m",
+                    title = "Warming Kronos caches",
+                    "Warming Kronos caches in order to serve up metadata faster....this may take a while"
+        )
+      )
+      
+      rdsDir <- file.path(dataPath, "kronos", cdmSource$name, cdmSource$loadId)
+      if (!dir.exists(rdsDir)) {
+        CdmMetadata::insertKronosMetadata(connectionDetails = connectionDetails, 
+                                          vocabDatabaseSchema = cdmSource$vocabDatabaseSchema, 
+                                          resultsDatabaseSchema = cdmSource$resultsDatabaseSchema, 
+                                          rdsDir = rdsDir)
+      }
+        
+      showModal(
+        modalDialog(size = "m",
+                    title = sprintf("Warming Achilles cache for %s", cdmSource$name),
+                    sprintf("Warming Achilles caches for %s in order to serve up metadata faster....this may take a while", cdmSource$name)
+        )
+      )
       
       ffDir <- file.path(dataPath, "persons", cdmSource$name, cdmSource$loadId)
       if (!dir.exists(file.path(dataPath, "persons"))) {
@@ -174,7 +190,7 @@ shinyServer(function(input, output, session) {
     releases <- (readRDS(sourcesPath))$releases
     for (release in releases) {
       theseSources <- cdmSources[sapply(cdmSources, function(c) c$release == release)]
-      popRds <- file.path(dataPath, release, "totalPop.rds")
+      popRds <- file.path(dataPath, "totalPop", sprintf("%s.rds", release))
       if (!dir.exists(dirname(popRds))) { dir.create(path = dirname(popRds), recursive = TRUE)}
       if (!file.exists(popRds)) {
         results <- lapply(theseSources, function(cdmSource) {
@@ -292,6 +308,16 @@ shinyServer(function(input, output, session) {
     output$kbContent <- renderUI({
       do.call(tabsetPanel, newTabs)
     })
+  }
+  
+  .getKronosMeta <- function(entityConceptId) {
+    rdsPath <- file.path(dataPath, "kronos", currentSource()$name, currentSource()$loadId, sprintf("%s.rds", entityConceptId))
+    if (file.exists(rdsPath)) {
+      readRDS(rdsPath) %>%
+        dplyr::select(entity_concept_id, activity_as_string, activity_start_date)
+    } else {
+      data.frame()
+    }
   }
   
   .getDomainKb <- function() {
@@ -913,8 +939,9 @@ shinyServer(function(input, output, session) {
     removeModal(session = session)
   }
   
-  .getSourcePopulation <- function() {
-    df <- readRDS(file.path(dataPath, "totalPop.rds"))
+  .getSourcePopulation <- function(cdmSource) {
+    popRds <- file.path(dataPath, "totalPop", sprintf("%s.rds", cdmSource$release))
+    df <- readRDS(popRds)
     prettyNum(df$COUNT_VALUE[df$CDM_SOURCE == currentSource()$name], big.mark = ",")
   }
   
@@ -955,7 +982,7 @@ shinyServer(function(input, output, session) {
     })
     output$provNumPersons <- renderInfoBox({
       infoBox("Total Persons", 
-              .getSourcePopulation(), color = "purple",
+              .getSourcePopulation(cdmSource), color = "purple",
               icon = icon("users"), fill = TRUE)  
     })
   }
@@ -982,7 +1009,7 @@ shinyServer(function(input, output, session) {
         cdmSources <- (readRDS(sourcesPath))$sources
         cdmSources <- cdmSources[sapply(cdmSources, function(c) c$release == release)]
         
-        df <- readRDS(file.path(dataPath, release, "totalPop.rds"))
+        df <- readRDS(file.path(dataPath, "totalPop", sprintf("%s.rds", release)))
         totalPop <- sum(df$COUNT_VALUE)
         
         humanAgents <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
@@ -1521,30 +1548,40 @@ shinyServer(function(input, output, session) {
   # Query Metadata tables -----------------------------------------------------------------
   
   .refreshConceptPlot <- function() {
-
     
     conceptsMeta <- conceptsMeta()
     meta <- associatedTempEvents()
+    kronos <- .getKronosMeta(input$conceptId)
+    
+    thisPlot <- NULL
     
     if (nrow(conceptsMeta) > 0) {
+      
+      thisPlot <- plot_ly(data = conceptsMeta, x = ~DATE, y = ~COUNT_VALUE, name = "Concept Prevalance",
+              type = "scatter", mode = "lines", source = "C")
+      
       if (nrow(meta) > 0) {
-        plot_ly(data = conceptsMeta, x = ~DATE, y = ~COUNT_VALUE, name = "Concept Prevalance",
-                type = "scatter", mode = "lines", source = "C") %>%
+        thisPlot <- thisPlot %>%
           add_trace(data = meta, x = ~DATE, y = ~COUNT_VALUE, text = ~VALUE_AS_STRING, 
                     name = "Temporal Event", mode = "markers") %>%
           layout(hovermode = "closest", xaxis = list(title = "Date", showspikes = TRUE), 
                  yaxis = list(title = "Prevalence Per 1000 People", showspikes = TRUE))
-        
-        
       } else {
-        plot_ly(data = conceptsMeta, x = ~DATE, y = ~COUNT_VALUE, name = "Concept Prevalance",
-                type = "scatter", mode = "lines", source = "C") %>%
+        thisPlot <- thisPlot %>% 
           layout(xaxis = list(title = "Date"), yaxis = list(title = "Prevalence Per 1000 People"))
       }
       
-    } else {
-      NULL
+      if (nrow(kronos) > 0) {
+        kronos <- dplyr::inner_join(x = kronos, y = conceptsMeta, by = c("activity_start_date" = "DATE"))
+        thisPlot <- thisPlot %>%
+          add_trace(data = kronos, x = ~activity_start_date, y = ~COUNT_VALUE, text = ~activity_as_string, 
+                    name = "Kronos", mode = "markers", marker = list(
+                      color = '#DC143C')) 
+      }
+      
     }
+    
+    thisPlot
   }
   
   .getHeelResults <- function() {

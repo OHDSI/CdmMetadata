@@ -3,7 +3,9 @@ as
 (
   @cteSelects
 )
-select distinct A.STRATUM_2, A.COUNT_VALUE,
+select distinct 
+  A.STRATUM_2, 
+  A.COUNT_VALUE,
   B.ACTIVITY_START_DATE, 
   B.ACTIVITY_END_DATE,
   C.VALUE_AS_STRING,
