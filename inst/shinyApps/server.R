@@ -10,7 +10,9 @@ library(shinyWidgets)
 
 shinyServer(function(input, output, session) {
   
-  refresh <- reactiveValues(conceptKb = FALSE,
+  refresh <- reactiveValues(cachesReady = FALSE, 
+                            conceptKb = FALSE,
+                            domainKb = FALSE,
                             annotationBatch = 1,
                             valueBatch = 1)
 
@@ -23,7 +25,6 @@ shinyServer(function(input, output, session) {
   
   if (!file.exists(sourcesPath)) {
     shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=overview]")
-    shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=provenance]")
     shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=heelResults]")
     shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=knowledgeBase]")
     shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=design]")
@@ -49,29 +50,20 @@ shinyServer(function(input, output, session) {
     connectionDetails  
   }
   
-  baseUrl <- reactive({
-    if (file.exists(sourcesPath)) {
-      (readRDS(sourcesPath))$baseUrl  
-    } else {
-      FALSE
-    }
-  })
-  
   .warmCaches <- function() {
     
     cdmSources <- (readRDS(sourcesPath))$sources
-    
     for (cdmSource in cdmSources) {
       connectionDetails <- .getConnectionDetails(cdmSource)
       CdmMetadata::createTables(connectionDetails = connectionDetails, resultsDatabaseSchema = cdmSource$resultsDatabaseSchema, outputFolder = "output")
       
       showModal(
         modalDialog(size = "m",
-                    title = "Warming Kronos caches",
+                    title = "Warming Kronos caches", easyClose = FALSE,
                     "Warming Kronos caches in order to serve up metadata faster....this may take a while"
         )
       )
-      
+       
       rdsDir <- file.path(dataPath, "kronos", cdmSource$name, cdmSource$loadId)
       if (!dir.exists(rdsDir)) {
         CdmMetadata::insertKronosMetadata(connectionDetails = connectionDetails, 
@@ -79,14 +71,14 @@ shinyServer(function(input, output, session) {
                                           resultsDatabaseSchema = cdmSource$resultsDatabaseSchema, 
                                           rdsDir = rdsDir)
       }
-        
+      
       showModal(
         modalDialog(size = "m",
                     title = sprintf("Warming Achilles cache for %s", cdmSource$name),
                     sprintf("Warming Achilles caches for %s in order to serve up metadata faster....this may take a while", cdmSource$name)
-        )
+                    )
       )
-      
+     
       ffDir <- file.path(dataPath, "persons", cdmSource$name, cdmSource$loadId)
       if (!dir.exists(file.path(dataPath, "persons"))) {
         dir.create(file.path(dataPath, "persons"), recursive = TRUE)
@@ -94,99 +86,98 @@ shinyServer(function(input, output, session) {
       
       if (!dir.exists(ffDir)) {
         connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
-        
+       
         sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "person/getPersons.sql"))
         sql <- SqlRender::render(sql = sql, 
-                                    cdmDatabaseSchema = cdmSource$cdmDatabaseSchema)
+                                cdmDatabaseSchema = cdmSource$cdmDatabaseSchema)
         sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
-        
+       
         persons <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
-        
+       
         ffbase::save.ffdf(persons, dir = ffDir)
         DatabaseConnector::disconnect(connection = connection)
-      }
-      
-      ffDir <- file.path(dataPath, "achillesConcepts", cdmSource$name, cdmSource$loadId)
-      if (!dir.exists(file.path(dataPath, "achillesConcepts"))) {
-        dir.create(file.path(dataPath, "achillesConcepts"), recursive = TRUE)
-      }
-      
-      if (!dir.exists(ffDir)) {
-        sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "conceptExplore/getAchillesConcepts.sql"))
-        sql <- SqlRender::render(sql = sql, 
-                                    resultsDatabaseSchema = cdmSource$resultsDatabaseSchema,
-                                    vocabDatabaseSchema = cdmSource$vocabDatabaseSchema, 
-                                    warnOnMissingParameters = FALSE)
-        sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
-        
-        connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
-        achillesConcepts <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
-        
-        ffbase::save.ffdf(achillesConcepts, dir = ffDir)
-        DatabaseConnector::disconnect(connection = connection)
-      }
-      
-      ffDir <- file.path(dataPath, "achillesResults", cdmSource$name, cdmSource$loadId)
-      if (!dir.exists(file.path(dataPath, "achillesResults"))) {
-        dir.create(file.path(dataPath, "achillesResults"), recursive = TRUE)
-      }
-      
-      if (!dir.exists(ffDir)) {
-        sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "conceptExplore/getAchillesResults.sql"))
-        sql <- SqlRender::render(sql = sql, 
-                                    resultsDatabaseSchema = cdmSource$resultsDatabaseSchema,
-                                    vocabDatabaseSchema = cdmSource$vocabDatabaseSchema, 
-                                    warnOnMissingParameters = FALSE)
-        sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
-        
-        connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
-        achillesResults <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
-        
-        ffbase::save.ffdf(achillesResults, dir = ffDir)
-        DatabaseConnector::disconnect(connection = connection)
-      }
-      
-      ffDir <- file.path(dataPath, "observationPeriods", cdmSource$name, cdmSource$loadId)
-      if (!dir.exists(file.path(dataPath, "observationPeriods"))) {
-        dir.create(file.path(dataPath, "observationPeriods"), recursive = TRUE)
-      }
-      
-      if (!dir.exists(ffDir)) {
-        sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "source/getObservationPeriods.sql"))
-        sql <- SqlRender::render(sql = sql, 
-                                    resultsDatabaseSchema = cdmSource$resultsDatabaseSchema,
-                                    vocabDatabaseSchema = cdmSource$vocabDatabaseSchema, 
-                                    warnOnMissingParameters = FALSE)
-        sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
-        
-        connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
-        observationPeriods <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
-        
-        ffbase::save.ffdf(observationPeriods, dir = ffDir)
-        DatabaseConnector::disconnect(connection = connection)
-      }
-      
-      ffDir <- file.path(dataPath, "oneDayObs", cdmSource$name, cdmSource$loadId)
-      if (!dir.exists(file.path(dataPath, "oneDayObs"))) {
-        dir.create(file.path(dataPath, "oneDayObs"), recursive = TRUE)
-      }
-      
-      if (!dir.exists(ffDir)) {
-        sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "source/getOneDayObs.sql"))
-        sql <- SqlRender::render(sql = sql, 
-                                    resultsDatabaseSchema = cdmSource$resultsDatabaseSchema,
-                                    vocabDatabaseSchema = cdmSource$vocabDatabaseSchema, 
-                                    warnOnMissingParameters = FALSE)
-        sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
-        
-        connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
-        oneDayObs <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
-        
-        ffbase::save.ffdf(oneDayObs, dir = ffDir)
-        DatabaseConnector::disconnect(connection = connection)
+     }
+     
+     ffDir <- file.path(dataPath, "achillesConcepts", cdmSource$name, cdmSource$loadId)
+     if (!dir.exists(file.path(dataPath, "achillesConcepts"))) {
+       dir.create(file.path(dataPath, "achillesConcepts"), recursive = TRUE)
+     }
+     
+     if (!dir.exists(ffDir)) {
+       sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "conceptExplore/getAchillesConcepts.sql"))
+       sql <- SqlRender::render(sql = sql, 
+                                resultsDatabaseSchema = cdmSource$resultsDatabaseSchema,
+                                vocabDatabaseSchema = cdmSource$vocabDatabaseSchema, 
+                                warnOnMissingParameters = FALSE)
+       sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
+       
+       connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+       achillesConcepts <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
+       
+       ffbase::save.ffdf(achillesConcepts, dir = ffDir)
+       DatabaseConnector::disconnect(connection = connection)
+     }
+     
+     ffDir <- file.path(dataPath, "achillesResults", cdmSource$name, cdmSource$loadId)
+     if (!dir.exists(file.path(dataPath, "achillesResults"))) {
+       dir.create(file.path(dataPath, "achillesResults"), recursive = TRUE)
+     }
+     
+     if (!dir.exists(ffDir)) {
+       sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "conceptExplore/getAchillesResults.sql"))
+       sql <- SqlRender::render(sql = sql, 
+                                resultsDatabaseSchema = cdmSource$resultsDatabaseSchema,
+                                vocabDatabaseSchema = cdmSource$vocabDatabaseSchema, 
+                                warnOnMissingParameters = FALSE)
+       sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
+       
+       connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+       achillesResults <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
+       
+       ffbase::save.ffdf(achillesResults, dir = ffDir)
+       DatabaseConnector::disconnect(connection = connection)
+     }
+     
+     ffDir <- file.path(dataPath, "observationPeriods", cdmSource$name, cdmSource$loadId)
+     if (!dir.exists(file.path(dataPath, "observationPeriods"))) {
+       dir.create(file.path(dataPath, "observationPeriods"), recursive = TRUE)
+     }
+     
+     if (!dir.exists(ffDir)) {
+       sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "source/getObservationPeriods.sql"))
+       sql <- SqlRender::render(sql = sql, 
+                                resultsDatabaseSchema = cdmSource$resultsDatabaseSchema,
+                                vocabDatabaseSchema = cdmSource$vocabDatabaseSchema, 
+                                warnOnMissingParameters = FALSE)
+       sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
+       
+       connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+       observationPeriods <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
+       
+       ffbase::save.ffdf(observationPeriods, dir = ffDir)
+       DatabaseConnector::disconnect(connection = connection)
+     }
+     
+     ffDir <- file.path(dataPath, "oneDayObs", cdmSource$name, cdmSource$loadId)
+     if (!dir.exists(file.path(dataPath, "oneDayObs"))) {
+       dir.create(file.path(dataPath, "oneDayObs"), recursive = TRUE)
+     }
+     
+     if (!dir.exists(ffDir)) {
+       sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "source/getOneDayObs.sql"))
+       sql <- SqlRender::render(sql = sql, 
+                                resultsDatabaseSchema = cdmSource$resultsDatabaseSchema,
+                                vocabDatabaseSchema = cdmSource$vocabDatabaseSchema, 
+                                warnOnMissingParameters = FALSE)
+       sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
+       
+       connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+       oneDayObs <- DatabaseConnector::querySql.ffdf(connection = connection, sql = sql)
+       
+       ffbase::save.ffdf(oneDayObs, dir = ffDir)
+       DatabaseConnector::disconnect(connection = connection)
       }
     }
-    
     releases <- (readRDS(sourcesPath))$releases
     for (release in releases) {
       theseSources <- cdmSources[sapply(cdmSources, function(c) c$release == release)]
@@ -211,9 +202,8 @@ shinyServer(function(input, output, session) {
       }
     }
     
+    refresh$cachesReady <- TRUE
     removeModal(session = session)
-    #sql <- SqlRender::render("select distinct vocabulary_version from @cdmDatabaseSchema.vocabulary where vocabulary_id = 'None'")
-    
   }
   
   .createAtlasLink <- function() {
@@ -245,13 +235,13 @@ shinyServer(function(input, output, session) {
   }
 
   .initSources <- function() {
-    
+
     siteSource <- list(
       "All Instances" = -999
     )
-    
+
     choices <- .getAllLoads()
-      
+
     updateSelectInput(session = session, inputId = "cdmSource", choices = c(siteSource, choices))
   }
   
@@ -266,50 +256,6 @@ shinyServer(function(input, output, session) {
   
   # knowledge base --------------------------------------------------------
   
-  .getPersonKb <- function() {
-    
-    #removeUI(selector = sprintf("#%s div:has(> .box)", parentDiv), session = session)
-    
-    newTabs <- list(
-      tabPanel(title = "Data Quality",
-               br()),
-      tabPanel(title = "Chart Review",
-               br())
-    )
-
-    output$kbContent <- renderUI({
-      do.call(tabsetPanel, newTabs)
-    })
-
-  }
-  
-  .getConceptKb <- function() {
-    newTabs <- list(
-      tabPanel(title = "Data Quality",
-               DT::dataTableOutput(outputId = "dtConceptHeels") %>% withSpinner(color = spinnerColor)),
-      tabPanel(title = "Time Series",
-               helpText("Time-based metadata about the selected concept"),
-               h4("Click on a point on the plot to add a temporal event. Or, click on an existing temporal event in the table below in order to edit or delete it."),
-               box(width = 8,
-                  plotlyOutput(outputId = "metaTimePlot")  %>% withSpinner(color = spinnerColor)
-               ),
-               box(width = 4,
-                  selectInput(inputId = "temporalStartDate", label = "Select Date", choices = c()),
-                  textAreaInput(inputId = "temporalEventValue", label = "Temporal Event Description",
-                                placeholder = "Enter a description of the temporal event connected to this concept at the above date"),
-                  actionButton(inputId = "btnAddTemporalEvent", label = "Add", icon = icon("check")),
-                  actionButton(inputId = "btnEditTemporalEvent", label = "Edit", icon = icon("edit")),
-                  actionButton(inputId = "btnDeleteTemporalEvent", label = "Delete", icon = icon("minus"))),
-               box(width = 12,
-                  DT::dataTableOutput(outputId = "dtTemporalEvent") %>% withSpinner(color="#0dc5c1"))
-               )
-      )
-    
-    output$kbContent <- renderUI({
-      do.call(tabsetPanel, newTabs)
-    })
-  }
-  
   .getKronosMeta <- function(entityConceptId) {
     rdsPath <- file.path(dataPath, "kronos", currentSource()$name, currentSource()$loadId, sprintf("%s.rds", entityConceptId))
     if (file.exists(rdsPath)) {
@@ -318,29 +264,6 @@ shinyServer(function(input, output, session) {
     } else {
       data.frame()
     }
-  }
-  
-  .getDomainKb <- function() {
-    newTabs <- list(
-      tabPanel(title = "Data Quality",
-               DT::dataTableOutput(outputId = "dtDomainHeels") %>% withSpinner(color = spinnerColor))
-    )
-  }
-  
-  .getConceptSetKb <- function() {
-    
-  }
-  
-  .getCohortDefKb <- function() {
-    
-  }
-  
-  .getPleKb <- function() {
-    
-  }
-  
-  .getPlpKb <- function() {
-    
   }
 
   # Heel Results download / upload --------------------------------------------
@@ -352,7 +275,11 @@ shinyServer(function(input, output, session) {
   sourcesFileInput <- reactiveValues(
     clear = FALSE
   )
-
+  
+  dictionaryFileInput <- reactiveValues(
+    clear = FALSE
+  )
+  
   observeEvent(input$uploadSourcesJson, {
     if (!is.null(input$uploadSourcesJson$datapath)) {
       for (f in list.files(path = dataPath, all.files = TRUE, full.names = TRUE)) {
@@ -363,6 +290,7 @@ shinyServer(function(input, output, session) {
       saveRDS(object = json, file = sourcesPath)
       shinyjs::show(selector = "#sidebarCollapsed li a[data-value=overview]")
       shinyjs::show(id = "sidebarSelects")
+      .warmCaches()
       .initSources()
       reset(id = "uploadSourcesJson")
       sourcesFileInput$clear <- TRUE
@@ -377,6 +305,27 @@ shinyServer(function(input, output, session) {
   observeEvent(input$uploadSourcesJson, {
     sourcesFileInput$clear <- FALSE
   }, priority = 1000)
+  
+  observeEvent(input$uploadDictionary, {
+    dictionaryFileInput$clear <- FALSE
+  }, priority = 1000)
+  
+  .handleDictionaryUpload <- function() {
+    if (!is.null(input$uploadDictionary$datapath) & !dictionaryFileInput$clear) {
+      df <- read.csv(input$uploadDictionary$datapath,
+                     header = TRUE, stringsAsFactors = FALSE, as.is = TRUE)
+      
+      
+      
+      # for (i in 1:nrow(df)) {
+      #   row <- df[i,]
+      #   
+      # }
+      
+      reset(id = "uploadDictionary")
+      dictionaryFileInput$clear <- TRUE
+    }
+  }
   
   .handleHeelResultsUpload <- function() {
     
@@ -457,9 +406,78 @@ shinyServer(function(input, output, session) {
     })
   }
   
-  output$metaTimePlot <- renderPlotly({
-    req(input$conceptId)
+  .createDataDensityPlot <- function(sqlScript, yAxisLabel, title = yAxisLabel, domainId = NULL) {
+    connection <- DatabaseConnector::connect(connectionDetails = connectionDetails())
+    on.exit(DatabaseConnector::disconnect(connection = connection))
     
+    sql <- SqlRender::readSql(sourceFile = file.path(sqlRoot, "conceptExplore", sqlScript))
+    sql <- SqlRender::render(sql = sql, 
+                             resultsDatabaseSchema = resultsDatabaseSchema())
+    sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails()$dbms)
+    
+    df <- DatabaseConnector::querySql(connection = connection, sql = sql)
+    
+    if (!is.null(domainId)) {
+      
+      domainName <- names(domainConceptIds[sapply(domainConceptIds, function (s) s == domainId)])
+      domainName <- sprintf("%s %s", domainName, ifelse(domainName == "Drug", "exposure", "occurrence"))
+      
+      df <- df[tolower(df$SERIES_NAME) == tolower(domainName), ] 
+    }
+    df$DATE <- as.Date(paste0(df$X_CALENDAR_MONTH, '01'), format='%Y%m%d')
+    
+    seriesDfs <- lapply(unique(df$SERIES_NAME), function(seriesName) {
+      df[df$SERIES_NAME == seriesName, ]
+    })
+    
+    thisPlot <- plot_ly(type = "scatter",
+                        mode = "lines") %>%
+      layout(title = title,
+             xaxis = list(title = "Year"),
+             yaxis = list(title = yAxisLabel))
+    
+    for (seriesDf in seriesDfs) {
+      thisPlot <- thisPlot %>% 
+        add_trace(data = seriesDf,
+                  y = ~Y_RECORD_COUNT, 
+                  x = ~DATE,
+                  name = unique(seriesDf$SERIES_NAME),
+                  mode = "lines")
+    }
+    
+    thisPlot
+  }
+  
+  output$dbTotalRowsPlot <- renderPlotly({
+    .createDataDensityPlot(sqlScript = "totalrecords.sql", 
+                           yAxisLabel = "# of Records",
+                           title = "Total Rows")
+  })
+  
+  output$dbRecordsPerPersonPlot <- renderPlotly({
+    .createDataDensityPlot(sqlScript = "recordsperperson.sql", 
+                           yAxisLabel = "Records Per Person")
+  })
+  
+  output$domainTotalRowsPlot <- renderPlotly({
+    req(input$domainIdKb)
+    
+    .createDataDensityPlot(sqlScript = "totalrecords.sql", 
+                           yAxisLabel = "# of Records", 
+                           title = "Total Rows",
+                           domainId = input$domainIdKb)
+  })
+  
+  output$domainRecordsPerPersonPlot <- renderPlotly({
+    req(input$domainIdKb)
+    
+    .createDataDensityPlot(sqlScript = "recordsperperson.sql", 
+                           yAxisLabel = "Records Per Person", 
+                           domainId = input$domainIdKb)
+  })
+  
+  output$metaConceptTimePlot <- renderPlotly({
+    req(input$conceptId)
     
     if (nrow(conceptsMeta()) > 0) {
       
@@ -475,7 +493,7 @@ shinyServer(function(input, output, session) {
     .refreshConceptPlot()
   })
   
-  output$dtTemporalEvent <- renderDataTable(expr = {
+  output$dtConceptTemporalEvent <- renderDataTable(expr = {
     req(input$conceptId)
     meta <- associatedTempEvents()
 
@@ -498,6 +516,34 @@ shinyServer(function(input, output, session) {
                        class = "stripe nowrap compact", extensions = c("Responsive"))
 
     table
+  })
+  
+  output$dtConceptKronosEvents <- renderDataTable(expr = {
+    req(input$conceptId)
+    kronos <- .getKronosMeta(input$conceptId)
+    if (nrow(kronos) > 0) {
+      metaDataTable <- dplyr::select(kronos,
+                                     `Date` = activity_start_date,
+                                     `Kronos Event` = activity_as_string)
+      
+      options <- list(pageLength = 10,
+                      searching = TRUE,
+                      lengthChange = FALSE,
+                      ordering = TRUE,
+                      paging = TRUE,
+                      scrollY = '15vh')
+      selection <- list(mode = "single", target = "row")
+      
+      table <- datatable(metaDataTable,
+                         options = options,
+                         selection = "single",
+                         rownames = FALSE,
+                         class = "stripe nowrap compact", extensions = c("Responsive"))
+      
+      table
+    } else {
+      data.frame()
+    }
   })
   
   # CRUD buttons -----------------------------------
@@ -531,6 +577,14 @@ shinyServer(function(input, output, session) {
   
   # Reactives ---------------------------------------------------------------------
   
+  baseUrl <- reactive({
+    if (file.exists(sourcesPath)) {
+      (readRDS(sourcesPath))$baseUrl  
+    } else {
+      FALSE
+    }
+  })
+  
   persons <- reactive({
     load.ffdf(file.path(dataPath, "persons", currentSource()$name, input$cdmSource))
     df <- (as.data.frame(persons))
@@ -553,6 +607,32 @@ shinyServer(function(input, output, session) {
                     `Birth Year` = YEAR_OF_BIRTH,
                     `Gender` = GENDER_CONCEPT_ID,
                     `Number of Annotations` = NUM_ANNOTATIONS)
+  })
+  
+  .getDomainMeta <- function() {
+    # sql <- SqlRender::readSql(file.path(sqlRoot, "domainExplore/getDomainMeta.sql"))
+    # sql <- SqlRender::render(sql = sql, 
+    #                          resultsDatabaseSchema = resultsDatabaseSchema(),
+    #                          conceptId = input$conceptId,
+    #                          cteSelects = paste(cteSelects, collapse = " union all "))
+    # sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails()$dbms)
+    # 
+    # connection <- DatabaseConnector::connect(connectionDetails = connectionDetails())
+    # on.exit(DatabaseConnector::disconnect(connection = connection))
+    # 
+    # df <- DatabaseConnector::querySql(connection = connection, sql = sql)
+    # if (nrow(df) > 0) {
+    #   df$DATE <- as.Date(paste0(df$STRATUM_2, "01"), format = "%Y%m%d")
+    # }
+    # refresh$conceptKb <- FALSE
+    # df
+  }
+  
+  domainMeta <- reactive({
+    
+    refresh$domainKb
+    
+    #.getDomainMeta()
   })
   
   conceptsMeta <- reactive({
@@ -751,6 +831,13 @@ shinyServer(function(input, output, session) {
     DatabaseConnector::querySql(connection = connection, sql = sql)
   }
   
+  output$sourceDescription <- renderText({
+    req(input$cdmSource)
+    
+    result <- .getSourceDescription(connectionDetails(), resultsDatabaseSchema())
+    result[[1]]
+  })
+  
   .deleteTemporalEvent <- function() {
     connection <- DatabaseConnector::connect(connectionDetails = connectionDetails())
     on.exit(DatabaseConnector::disconnect(connection = connection))
@@ -833,7 +920,7 @@ shinyServer(function(input, output, session) {
   .editTemporalEvent <- function() {
     
     df <- associatedTempEvents()
-    row_count <- input$dtTemporalEvent_rows_selected
+    row_count <- input$dtConceptTemporalEvent_rows_selected
     
     connection <- DatabaseConnector::connect(connectionDetails = connectionDetails())
     on.exit(DatabaseConnector::disconnect(connection = connection))
@@ -864,6 +951,8 @@ shinyServer(function(input, output, session) {
   }
   
   .submitSourceDescription <- function() {
+    
+    valueAsString <- .cleanStringInsert(input$sourceDescEdit)
     
     connection <- DatabaseConnector::connect(connectionDetails = connectionDetails())
     on.exit(DatabaseConnector::disconnect(connection = connection))
@@ -910,7 +999,7 @@ shinyServer(function(input, output, session) {
         meta_annotation_id = NA,
         value_concept_id = 0,
         value_type_concept_id = 0,
-        value_as_string = input$sourceDescEdit,
+        value_as_string = valueAsString,
         value_as_number = NA,
         operator_concept_id = 0, stringsAsFactors = FALSE
       )
@@ -927,13 +1016,16 @@ shinyServer(function(input, output, session) {
                                    metaValueId = df$META_VALUE_ID,
                                    metaEntityActivityId = df$META_ENTITY_ACTIVITY_ID,
                                    metaAgentId = input$selectAgent,
-                                   valueAsString = input$sourceDescEdit)
+                                   valueAsString = valueAsString)
       sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails()$dbms)
       
       DatabaseConnector::executeSql(connection = connection, sql = sql)
     }
     
-    .createSourceOverview(cdmSource = currentSource(), parentDiv = "overviewBox", width = 12)
+    #.createDatabaseInfoBoxes(cdmSource = currentSource(), parentDiv = "overviewBox", width = 12)
+    output$sourceDescription <- renderText({
+      input$sourceDescEdit
+    })
     showNotification("Source Description Submitted")
     
     removeModal(session = session)
@@ -945,31 +1037,14 @@ shinyServer(function(input, output, session) {
     prettyNum(df$COUNT_VALUE[df$CDM_SOURCE == currentSource()$name], big.mark = ",")
   }
   
-  .createSourceOverview <- function(cdmSource, parentDiv, width = 12) {
+  .createDatabaseInfoBoxes <- function(cdmSource, parentDiv, width = 12) {
     connectionDetails <- .getConnectionDetails(cdmSource)
     
-    #df <- readRDS(file.path(dataPath, "observationPeriods", sprintf("%s.rds", cdmSource$name)))
     load.ffdf(file.path(dataPath, "observationPeriods", currentSource()$name, input$cdmSource))
-    
+
     df <- as.data.frame(observationPeriods, stringsAsFactors = FALSE)
-    
-    df$DATE <- as.Date(paste0(df$STRATUM_1, '01'), format='%Y%m%d') 
-    
-    plot <- plot_ly(df, x = ~DATE, y = ~COUNT_VALUE, type = "scatter", mode = "lines+markers", 
-                    source = "C") %>%
-      layout(xaxis = list(title = "Date", showspikes = TRUE), yaxis = list(title = "Persons With Continuous Observation By Month"))
-    
-    removeUI(selector = sprintf("#%s div:has(> .box)", parentDiv), session = session)
-    
-    insertUI(selector = sprintf("#%s", parentDiv), 
-             ui = {
-               shinydashboard::box(title = cdmSource$name, collapsible = TRUE, width = width,
-                                   div(.getSourceDescription(connectionDetails,
-                                                             cdmSource$resultsDatabaseSchema)),
-                                   plot
-               )
-             }, session = session)
-    
+
+    df$DATE <- as.Date(paste0(df$STRATUM_1, '01'), format='%Y%m%d')
     output$provStartDate <- renderInfoBox({
       infoBox("Start Date", 
               min(df$DATE), color = "green",
@@ -1003,85 +1078,87 @@ shinyServer(function(input, output, session) {
   observe({
     if (input$tabs == "overview") {
       
-      releases <- (readRDS(sourcesPath))$releases
-      
-      tabs <- lapply(releases, function(release) {
-        cdmSources <- (readRDS(sourcesPath))$sources
-        cdmSources <- cdmSources[sapply(cdmSources, function(c) c$release == release)]
+      if (file.exists(sourcesPath) & refresh$cachesReady) {
         
-        df <- readRDS(file.path(dataPath, "totalPop", sprintf("%s.rds", release)))
-        totalPop <- sum(df$COUNT_VALUE)
+        releases <- (readRDS(sourcesPath))$releases
         
-        humanAgents <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
-          connectionDetails <- .getConnectionDetails(cdmSource)
-          connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
-          sql <- SqlRender::render(sql = "select agent_first_name, agent_last_name 
-                                      from @resultsDatabaseSchema.meta_agent where meta_agent_concept_id = 1000;",
-                                      resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)
-          sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
-          agents <- DatabaseConnector::querySql(connection = connection, sql = sql)
-          DatabaseConnector::disconnect(connection = connection)
-          agents
-        })
-        
-        algorithmAgents <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
-          connectionDetails <- .getConnectionDetails(cdmSource)
-          connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
-          sql <- SqlRender::render(sql = "select agent_algorithm 
-                                      from @resultsDatabaseSchema.meta_agent where meta_agent_concept_id = 2000;",
-                                      resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)
-          sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
-          agents <- DatabaseConnector::querySql(connection = connection, sql = sql)
-          DatabaseConnector::disconnect(connection = connection)
-          agents
-        })
-        
-        uniqueHumans <- dplyr::distinct(do.call("rbind", humanAgents))
-        uniqueAlgorithms <- dplyr::distinct(do.call("rbind", algorithmAgents))
-        
-        counts <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
-          connectionDetails <- .getConnectionDetails(cdmSource)
-          connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
-          sql <- SqlRender::render(sql = "select count(*) from @resultsDatabaseSchema.meta_entity_activity;",
-                                      resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)
-          sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
-          count <- DatabaseConnector::querySql(connection = connection, sql = sql)
-          DatabaseConnector::disconnect(connection = connection)
-          as.integer(count > 0)
-        })
-        
-        prop <- sum(unlist(counts)) / length(cdmSources)
-        
-        
-        tabPanel(title = sprintf("Release %s", release),
-                 
-          infoBox("Number of CDM Instances", 
-                  length(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)]), 
-                  icon = icon("sitemap"), fill = TRUE),
-          infoBox(
-            "Total Persons", prettyNum(totalPop, big.mark = ","), icon = icon("users"),
-            color = "purple", fill = TRUE
-          ),
-          infoBox(
-            "Number of Distinct Human Agents", nrow(uniqueHumans), icon = icon("user-tag"),
-            color = "red", fill = TRUE
-          ),
-          infoBox(
-            "Number of Distinct Algorithm Agents", nrow(uniqueAlgorithms), icon = icon("code"),
-            color = "yellow", fill = TRUE
-          ),
-          infoBox(
-            "Proportion of Sources with Metadata", prop * 100.00, icon = icon("percent"),
-            color = "green", fill = TRUE
+        tabs <- lapply(releases, function(release) {
+          cdmSources <- (readRDS(sourcesPath))$sources
+          cdmSources <- cdmSources[sapply(cdmSources, function(c) c$release == release)]
+          
+          df <- readRDS(file.path(dataPath, "totalPop", sprintf("%s.rds", release)))
+          totalPop <- sum(df$COUNT_VALUE)
+          
+          humanAgents <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
+            connectionDetails <- .getConnectionDetails(cdmSource)
+            connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+            sql <- SqlRender::render(sql = "select agent_first_name, agent_last_name 
+                                        from @resultsDatabaseSchema.meta_agent where meta_agent_concept_id = 1000;",
+                                        resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)
+            sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
+            agents <- DatabaseConnector::querySql(connection = connection, sql = sql)
+            DatabaseConnector::disconnect(connection = connection)
+            agents
+          })
+          
+          algorithmAgents <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
+            connectionDetails <- .getConnectionDetails(cdmSource)
+            connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+            sql <- SqlRender::render(sql = "select agent_algorithm 
+                                        from @resultsDatabaseSchema.meta_agent where meta_agent_concept_id = 2000;",
+                                        resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)
+            sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
+            agents <- DatabaseConnector::querySql(connection = connection, sql = sql)
+            DatabaseConnector::disconnect(connection = connection)
+            agents
+          })
+          
+          uniqueHumans <- dplyr::distinct(do.call("rbind", humanAgents))
+          uniqueAlgorithms <- dplyr::distinct(do.call("rbind", algorithmAgents))
+          
+          counts <- lapply(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)], function(cdmSource) {
+            connectionDetails <- .getConnectionDetails(cdmSource)
+            connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
+            sql <- SqlRender::render(sql = "select count(*) from @resultsDatabaseSchema.meta_entity_activity;",
+                                        resultsDatabaseSchema = cdmSource$resultsDatabaseSchema)
+            sql <- SqlRender::translate(sql = sql, targetDialect = connectionDetails$dbms)
+            count <- DatabaseConnector::querySql(connection = connection, sql = sql)
+            DatabaseConnector::disconnect(connection = connection)
+            as.integer(count > 0)
+          })
+          
+          prop <- sum(unlist(counts)) / length(cdmSources)
+          
+          
+          tabPanel(title = sprintf("Release %s", release),
+                   
+            infoBox("Number of CDM Instances", 
+                    length(cdmSources[sapply(cdmSources, function(c) c$loadId != -999)]), 
+                    icon = icon("sitemap"), fill = TRUE),
+            infoBox(
+              "Total Persons", prettyNum(totalPop, big.mark = ","), icon = icon("users"),
+              color = "purple", fill = TRUE
+            ),
+            infoBox(
+              "Number of Distinct Human Agents", nrow(uniqueHumans), icon = icon("user-tag"),
+              color = "red", fill = TRUE
+            ),
+            infoBox(
+              "Number of Distinct Algorithm Agents", nrow(uniqueAlgorithms), icon = icon("code"),
+              color = "yellow", fill = TRUE
+            ),
+            infoBox(
+              "Proportion of Sources with Metadata", prop * 100.00, icon = icon("percent"),
+              color = "green", fill = TRUE
+            )
           )
-        )
-      })
-      
-      output$overviewBoxes <- renderUI({
-        do.call(tabsetPanel, tabs)
-      })
+        })
+        
+        output$overviewBoxes <- renderUI({
+          do.call(tabsetPanel, tabs)
+        })
+      }
     }
-    
   })
   
   
@@ -1123,13 +1200,18 @@ shinyServer(function(input, output, session) {
       })
     }
     
+    if (input$tabs == "knowledgeBase" & input$cdmSource != -999) {
+      if (input$kbTabs == "Database") {
+        .createDatabaseInfoBoxes(cdmSource = currentSource(), parentDiv = "overviewBox", width = 12)
+      }
+    }
     
     if (input$tabs == "knowledgeBase" & currentSource()$loadId != -999) {
       if (input$kbTabs == "Domain") {
         updateSelectInput(session = session, inputId = "domainIdKb", choices = domainConceptIds)  
       }  
     
-      if (input$kbTabs == "Concept" & input$kbConcept == "Time Series") {
+      if (input$kbTabs == "Concept") {
         
         if (input$domainId == "") {
           updateSelectInput(session = session, inputId = "domainId", choices = domainConceptIds)  
@@ -1141,7 +1223,7 @@ shinyServer(function(input, output, session) {
         #   shinyjs::disable(id = "btnAddTemporalEvent")
         #   shinyjs::disable(id = "btnEditTemporalEvent")
         #   shinyjs::disable(id = "btnDeleteTemporalEvent")
-        # } else if (length(input$dtTemporalEvent_rows_selected) == 0) {
+        # } else if (length(input$dtConceptTemporalEvent_rows_selected) == 0) {
         #   shinyjs::enable(id = "btnAddTemporalEvent")
         #   shinyjs::disable(id = "btnEditTemporalEvent")
         #   shinyjs::disable(id = "btnDeleteTemporalEvent")
@@ -1161,8 +1243,7 @@ shinyServer(function(input, output, session) {
     if (currentSource()$loadId != -999) {
       shinyjs::show(id = "tasksDropdown")
       
-      sourceDesc <- .getSourceDescription(connectionDetails = connectionDetails(), 
-                                          resultsDatabaseSchema = resultsDatabaseSchema())
+      sourceDesc <- .getSourceDescription(connectionDetails(), resultsDatabaseSchema())
       
       if (nrow(sourceDesc) == 0) {
         sourceDesc <- list(VALUE_AS_STRING = "")
@@ -1206,7 +1287,7 @@ shinyServer(function(input, output, session) {
   observe({
     req(input$cdmSource)
     if (input$cdmSource == -999) {
-      shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=provenance]")
+      #shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=provenance]")
       shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=heelResults]")  
       shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=knowledgeBase]")  
       shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=design]") 
@@ -1218,20 +1299,12 @@ shinyServer(function(input, output, session) {
       shinyjs::show(selector = "#sidebarCollapsed li a[data-value=heelResults]")  
       shinyjs::show(selector = "#sidebarCollapsed li a[data-value=knowledgeBase]")  
       shinyjs::show(selector = "#sidebarCollapsed li a[data-value=design]")    
-      updateTabItems(session = session, inputId = "tabs", selected = "provenance")
+      #updateTabItems(session = session, inputId = "tabs", selected = "provenance")
+      updateTabItems(session = session, inputId = "tabs", selected = "knowledgeBase")
     }  
     
     
   })
-  
-  observe({
-    req(input$cdmSource)
-
-    if (input$tabs == "provenance" & input$cdmSource != -999) {
-      .createSourceOverview(cdmSource = currentSource(), parentDiv = "overviewBox", width = 12)
-    }
-  }) 
-
   
   # Output DataTable renders ------------------------------------------
   
@@ -1346,6 +1419,31 @@ shinyServer(function(input, output, session) {
     table  
   })
   
+  .getDictionary <- function() {
+    data.frame()
+  }
+  
+  output$dtDataDictionary <- renderDataTable(expr = {
+    .handleDictionaryUpload()
+    
+    df <- .getDictionary()
+
+    options <- list(pageLength = 50,
+                    searching = TRUE,
+                    lengthChange = FALSE,
+                    ordering = TRUE,
+                    paging = TRUE,
+                    scrollY = '50vh')
+    selection <- list(mode = "single", target = "row")
+    
+    table <- datatable(df,
+                       options = options,
+                       selection = "single",
+                       rownames = FALSE,
+                       class = "stripe wrap compact", extensions = c("Responsive"))
+    
+    table
+  })
   
   
   output$dtHeelResults <- renderDataTable(expr = {
@@ -1469,6 +1567,10 @@ shinyServer(function(input, output, session) {
   
   # Helpers ---------------------------------------------------
   
+  .cleanStringInsert <- function(valueAsString) {
+    gsub(pattern = "'", replacement = "''", x = valueAsString)
+  }
+  
   agentTextInputs <- c("agentFirstName",
                        "agentLastName",
                        "agentSuffix",
@@ -1547,6 +1649,12 @@ shinyServer(function(input, output, session) {
   
   # Query Metadata tables -----------------------------------------------------------------
   
+  .refreshDomainPlot <- function() {
+    domainMeta <- domainMeta()
+    
+    
+  }
+  
   .refreshConceptPlot <- function() {
     
     conceptsMeta <- conceptsMeta()
@@ -1594,6 +1702,11 @@ shinyServer(function(input, output, session) {
     on.exit(DatabaseConnector::disconnect(connection = connection))
     
     DatabaseConnector::querySql(connection = connection, sql = sql)
+  }
+  
+  .getHeelDrilldown <- function(ruleId) {
+    csv <- read.csv(file = file.path(csvRoot, "heelRulesDrilldown.csv"), header = TRUE, as.is = TRUE, stringsAsFactors = FALSE)
+    
   }
   
   .getAgents <- function() {
@@ -1797,6 +1910,21 @@ shinyServer(function(input, output, session) {
   }
   
   # Observe Events ------------------------------------------------------
+
+  observeEvent(input$btnClearAllCaches, handlerExpr = {
+    
+    confirmSweetAlert(inputId = "confirmPurgeCaches", session = session, title = "Clear All Caches?", 
+                      text = "Are you sure you want to clear all caches?")
+  }, priority = 1)
+  
+  observeEvent(input$confirmPurgeCaches, handlerExpr = {
+    if (input$confirmPurgeCaches) {
+      unlink(dataPath, recursive = TRUE)
+      dir.create(dataPath, recursive = TRUE)
+      shinyjs::hide(selector = "#sidebarCollapsed li a[data-value=overview]")
+      refresh$cachesReady <- FALSE
+    }
+  }, priority = 1)
   
   observeEvent(eventExpr = input$domainId, handlerExpr = {
   # observe({
@@ -1810,9 +1938,12 @@ shinyServer(function(input, output, session) {
     
     # load existing meta and annotations
     
+    df <- persons()
+    personId <- df$`Person Id`[input$dtPersonPicker_rows_selected]
+    
     showModal(
       modalDialog(size = "l",
-                  title = sprintf("Add Person-level Data Quality for person_id %d", 1),
+                  title = sprintf("Add Person-level Data Quality for person_id %s", personId),
                   .createActivityPrompts(kbType = "Person", activityConceptClass = "dq", entityAsString = "person_id")
       )
     )
@@ -1821,6 +1952,8 @@ shinyServer(function(input, output, session) {
         shinyjs::hide(id = "dqActivityTypePerson")
       }
       else {
+        typeConcepts <- jsonlite::read_json(file.path(jsonPath, "activityTypeConcepts.json"))
+        
         shinyjs::show(id = "dqActivityTypePerson")
         dqActivityTypeConceptIds <- unlist(typeConcepts[input$dqActivityPerson][[1]]) 
         updateSelectInput(session = session, inputId = "dqActivityTypePerson", choices = dqActivityTypeConceptIds)
@@ -1895,13 +2028,8 @@ shinyServer(function(input, output, session) {
     
   })
   
-  observeEvent(eventExpr = input$dtTemporalEvent_rows_selected, handlerExpr = {
-    
-    # input$btnAddTemporalEvent
-    # input$btnEditTemporalEvent
-    # input$confirmDeleteTemporalEvent
-    
-    row_count <- input$dtTemporalEvent_rows_selected
+  observeEvent(eventExpr = input$dtConceptTemporalEvent_rows_selected, handlerExpr = {
+    row_count <- input$dtConceptTemporalEvent_rows_selected
     
     df <- associatedTempEvents()
     
@@ -2559,26 +2687,41 @@ shinyServer(function(input, output, session) {
                     width = "800px")
         
         value <- NULL
-        if (!is.null(activityStartDate)) {
-          value <- activityStartDate
+        if (!is.null(oldActivityStartDate)) {
+          value <- oldActivityStartDate
         }
         inputActivityStartDate <- dateInput(inputId = sprintf("startDateDq%s", kbType), 
-                  label = sprintf("Activity Date: When did this phenomenon start to happen in the %s's history?", target), 
+                  label = sprintf("Activity Start Date: When did this phenomenon start to happen in the %s's history?", target), 
                   width = "500px", 
                   value = value)
         
         value <- NULL
-        if (!is.null(activityEndDate)) {
-          value <- activityEndDate
+        if (!is.null(oldActivityEndDate)) {
+          value <- oldActivityEndDate
         }
         inputActivityEndDate <- dateInput(inputId = sprintf("endDateDq%s", kbType), 
-                  label = sprintf("Activity Date: When did this phenomenon stop happening for this %s?", target), 
+                  label = sprintf("Activity End Date: When did this phenomenon stop happening for this %s?", target), 
                   width = "500px", 
                   value = value)
         
     }
     
-    list(inputActivityConceptId, inputActivityTypeConceptId, inputActivityStartDate, inputActivityEndDate)
+    if (kbType == "Person") {
+      
+      drilldownField <- selectInput(inputId = "drilldownConceptId", label = "Drilldown Field", choices = .getDrilldownConcepts())
+      drilldownIdentifier <- textInput(inputId = "drilldownIdentifier", label = "Drilldown Identifier")
+      
+      list(inputActivityConceptId, inputActivityTypeConceptId, 
+           drilldownField, drilldownIdentifier,
+           inputActivityStartDate, inputActivityEndDate)  
+    } else {
+      list(inputActivityConceptId, inputActivityTypeConceptId, inputActivityStartDate, inputActivityEndDate)
+    }
+  }
+  
+  .getDrilldownConcepts <- function() {
+    csv <- read.csv(file = file.path(csvRoot, "OMOP_CDM_v5_3.csv"), header = TRUE, as.is = TRUE, stringsAsFactors = FALSE)
+    csv$field
   }
   
   .createAnnotationBatch <- function(kbType,
